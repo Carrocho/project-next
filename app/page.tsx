@@ -10,7 +10,7 @@ import {
   PageContainer,
   PageSectionTitle,
   PageSection,
-  PageSectionScroller
+  PageSectionScroller,
 } from "./_components/ui/page";
 
 const Home = async () => {
@@ -50,7 +50,7 @@ const Home = async () => {
             {recommendedBarbershops.map((barbershop) => (
               <BarbershopItem key={barbershop.id} barbershop={barbershop} />
             ))}
-          </PageSectionScroller>
+          </PageSectionScroller>   
         </PageSection>
         <PageSection>
           <PageSectionTitle>Populares</PageSectionTitle>
