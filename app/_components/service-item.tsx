@@ -12,7 +12,7 @@ import {
 } from "./ui/sheet";
 import { Calendar } from "./ui/calendar";
 import { Separator } from "./ui/separator";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { ptBR } from "date-fns/locale";
 import { useAction } from "next-safe-action/hooks";
 import { toast } from "sonner";
@@ -20,6 +20,7 @@ import { useQuery } from "@tanstack/react-query";
 import { getDateAvailableTimeSlots } from "../_actions/get-date-available-time-slots";
 import { createBookingCheckoutSession } from "../_actions/create-booking-checkout-session";
 import { loadStripe } from "@stripe/stripe-js";
+import { isToday, isBefore, parse } from "date-fns";
 
 interface ServiceItemProps {
   service: BarbershopService & {
@@ -66,6 +67,25 @@ export function ServiceItem({ service }: ServiceItemProps) {
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+
+  const now = new Date();
+
+  const filteredAvailableTimeSlots = useMemo(() => {
+    if (!availableTimeSlots?.data || !selectedDate) return [];
+
+    // Se a data selecionada é hoje, filtra apenas horários que ainda não passaram
+    if (isToday(selectedDate)) {
+      return availableTimeSlots.data.filter((time) => {
+        const [hours, minutes] = time.split(":");
+        const timeDate = new Date(selectedDate);
+        timeDate.setHours(Number(hours), Number(minutes), 0, 0);
+        return !isBefore(timeDate, now);
+      });
+    }
+
+    // Para datas futuras, retorna todos os horários
+    return availableTimeSlots.data;
+  }, [availableTimeSlots, selectedDate]);
 
   const handleConfirm = async () => {
     if (!process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY) {
@@ -177,7 +197,7 @@ export function ServiceItem({ service }: ServiceItemProps) {
               <Separator />
 
               <div className="flex gap-3 overflow-x-auto px-5 [&::-webkit-scrollbar]:hidden">
-                {availableTimeSlots?.data?.map((time) => (
+                {filteredAvailableTimeSlots?.map((time) => (
                   <Button
                     key={time}
                     variant={selectedTime === time ? "default" : "outline"}
