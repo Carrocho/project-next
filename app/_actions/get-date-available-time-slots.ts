@@ -61,7 +61,11 @@ export const getDateAvailableTimeSlots = actionClient
     const availableTimeSlots = TIME_SLOTS.filter(
       (slot) => !occupiedSlots.includes(slot),
     );
-    return availableTimeSlots;
+    return {
+      all: TIME_SLOTS,
+      available: availableTimeSlots,
+      occupied: occupiedSlots,
+    };
   });
 
 //   => ["10:00", "11:00"]

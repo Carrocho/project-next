@@ -18,8 +18,8 @@ import { useAction } from "next-safe-action/hooks";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { getDateAvailableTimeSlots } from "../_actions/get-date-available-time-slots";
-import { createBookingCheckoutSession } from "../_actions/create-booking-checkout-session";
-import { loadStripe } from "@stripe/stripe-js";
+import { createBooking } from "../_actions/create-booking";
+import { cn } from "@/lib/utils";
 import { isToday, isBefore, parse } from "date-fns";
 
 interface ServiceItemProps {
@@ -31,17 +31,19 @@ interface ServiceItemProps {
 export function ServiceItem({ service }: ServiceItemProps) {
   const [selectedDate, setSelectedDate] = useState<Date | undefined>();
   const [selectedTime, setSelectedTime] = useState<string | undefined>();
-  const { executeAsync: executeCreateBookingCheckoutSession, isPending } = useAction(
-    createBookingCheckoutSession,
-  );
+  const { executeAsync: executeCreateBooking, isPending } =
+    useAction(createBooking);
   const [sheetIsOpen, setSheetIsOpen] = useState(false);
   const { data: availableTimeSlots } = useQuery({
     queryKey: ["date-available-time-slots", service.barbershopId, selectedDate],
-    queryFn: () =>
-      getDateAvailableTimeSlots({
+    queryFn: async () => {
+      const res = await getDateAvailableTimeSlots({
         barbershopId: service.barbershopId,
         date: selectedDate!,
-      }),
+      });
+      // actionClient responses may be wrapped in { data } or return plain value
+      return (res as any).data ?? res;
+    },
     enabled: Boolean(selectedDate),
   });
 
@@ -71,27 +73,18 @@ export function ServiceItem({ service }: ServiceItemProps) {
   const now = new Date();
 
   const filteredAvailableTimeSlots = useMemo(() => {
-    if (!availableTimeSlots?.data || !selectedDate) return [];
+    if (!availableTimeSlots || !selectedDate) return [];
 
-    // Se a data selecionada é hoje, filtra apenas horários que ainda não passaram
-    if (isToday(selectedDate)) {
-      return availableTimeSlots.data.filter((time) => {
-        const [hours, minutes] = time.split(":");
-        const timeDate = new Date(selectedDate);
-        timeDate.setHours(Number(hours), Number(minutes), 0, 0);
-        return !isBefore(timeDate, now);
-      });
-    }
+    const all = (availableTimeSlots as any).all as string[];
+    const available = (availableTimeSlots as any).available as string[];
 
-    // Para datas futuras, retorna todos os horários
-    return availableTimeSlots.data;
+    // Mostrar todos os horários, inclusive os já passados se for hoje
+    // (aparecerão apagados/desabilitados)
+    return all;
   }, [availableTimeSlots, selectedDate]);
 
   const handleConfirm = async () => {
-    if (!process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY) {
-      toast.error("Erro ao criar checkout session");
-      return;
-    }
+    // cria o agendamento diretamente no banco
     if (!selectedTime || !selectedDate) {
       return;
     }
@@ -100,27 +93,18 @@ export function ServiceItem({ service }: ServiceItemProps) {
     const minutes = timeSplitted[1];
     const date = new Date(selectedDate);
     date.setHours(Number(hours), Number(minutes));
-    const checkoutSessionResult = await executeCreateBookingCheckoutSession({
+    const result = await executeCreateBooking({
       serviceId: service.id,
       date,
     });
-    if (
-      checkoutSessionResult.serverError ||
-      checkoutSessionResult.validationErrors
-    ) {
-      toast.error(checkoutSessionResult.validationErrors?._errors?.[0]);
+    if (result.serverError || result.validationErrors) {
+      toast.error(result.validationErrors?._errors?.[0]);
       return;
     }
-    const stripe = await loadStripe(
-      process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!,
-    );
-    if (!stripe || !checkoutSessionResult.data?.id) {
-      toast.error("Erro ao carregar Stripe");
-      return;
-    }
-    await stripe.redirectToCheckout({
-      sessionId: checkoutSessionResult.data.id,
-    });
+    toast.success("Agendamento criado com sucesso!");
+    setSelectedDate(undefined);
+    setSelectedTime(undefined);
+    setSheetIsOpen(false);
     // // 10:00
     // if (!selectedTime || !selectedDate) {
     //   return;
@@ -197,16 +181,45 @@ export function ServiceItem({ service }: ServiceItemProps) {
               <Separator />
 
               <div className="flex gap-3 overflow-x-auto px-5 [&::-webkit-scrollbar]:hidden">
-                {filteredAvailableTimeSlots?.map((time) => (
-                  <Button
-                    key={time}
-                    variant={selectedTime === time ? "default" : "outline"}
-                    className="shrink-0 rounded-full px-4 py-2"
-                    onClick={() => setSelectedTime(time)}
-                  >
-                    {time}
-                  </Button>
-                ))}
+                {filteredAvailableTimeSlots?.map((time) => {
+                  const available = (
+                    availableTimeSlots as any
+                  )?.available?.includes(time);
+
+                  // Verificar se o horário já passou (se for hoje)
+                  let isPast = false;
+                  if (isToday(selectedDate)) {
+                    const [hours, minutes] = time.split(":");
+                    const timeDate = new Date(selectedDate);
+                    timeDate.setHours(Number(hours), Number(minutes), 0, 0);
+                    isPast = isBefore(timeDate, now);
+                  }
+
+                  const isDisabled = !available || isPast;
+
+                  return (
+                    <Button
+                      key={time}
+                      variant={
+                        selectedTime === time && available && !isPast
+                          ? "default"
+                          : available && !isPast
+                            ? "outline"
+                            : "ghost"
+                      }
+                      className={cn(
+                        "shrink-0 rounded-full px-4 py-2",
+                        !available || isPast ? "opacity-40" : "",
+                      )}
+                      onClick={() =>
+                        available && !isPast && setSelectedTime(time)
+                      }
+                      disabled={isDisabled}
+                    >
+                      {time}
+                    </Button>
+                  );
+                })}
               </div>
 
               <Separator />
